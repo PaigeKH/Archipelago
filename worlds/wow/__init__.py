@@ -2,8 +2,6 @@ from BaseClasses import Item, Region, Location, ItemClassification
 from worlds.AutoWorld import World
 from worlds.generic.Rules import set_rule
 from .options import WorldOfWarcraftOptions
-from .ExportLua import export_lua_mappings
-from .ExportLuaConfig import export_lua_config
 import os
 import json
 import random
@@ -80,18 +78,7 @@ PREPENDS = {
     "Zones": 13,
     "Levels": 14,
     "Spells": 15,
-
-    # Class specific spells:
-    "Warrior": 20,
-    "DeathKnight": 21,
-    "Paladin": 22,
-    "Hunter": 23,
-    "Shaman": 24,
-    "Rogue": 25,
-    "Druid": 26, 
-    "Priest": 27,
-    "Warlock": 28,
-    "Mage": 29
+    "Class_Spells": 16,
 }
 
 FREE_LEVELS = 5
@@ -101,15 +88,13 @@ def preload_wow_metadata():
     spells_pkg = f"{__package__}.spells"
     wowap_file = pkg_resources.files(__package__).joinpath("wowap.json")
     skills_file = pkg_resources.files(__package__).joinpath("Skills.json")
+    items_file = pkg_resources.files(__package__).joinpath("items.json")
     locs = {}
     items = {
         "Victory": 101,
         "Gold": 102,
         "Progressive Level": 103,
         "Progressive Riding": 104,
-        "Random Buff": 105,
-        "Random Debuff": 106,
-        "Random Bag": 107,
     }
     loc_id = 1
     item_id = 8
@@ -126,6 +111,11 @@ def preload_wow_metadata():
             if zone_name not in all_zones:
                 all_zones[zone_name] = zones[zone_name]
 
+    with items_file.open("r", encoding="utf-8") as f:
+        items_list = json.load(f)
+        for category, subitems in items_list.items():
+            for item_name, data in subitems.items():
+                items[item_name] = int(f"{PREPENDS['Items']}{data}")
 
     for level in range(2, 81):
         locs[f"Level {level}"] = int(f"{PREPENDS['Levels']}{level}")
@@ -153,26 +143,26 @@ def preload_wow_metadata():
 
         for name in data.keys():
             if name not in locs:
-                locs[name] = int(f"{PREPENDS[className]}{data[name]['id']}")
+                locs[name] = int(f"{PREPENDS['Class_Spells']}{data[name]['id']}")
             if name not in items:
-                items[name] = int(f"{PREPENDS[className]}{data[name]['id']}")
+                items[name] = int(f"{PREPENDS['Class_Spells']}{data[name]['id']}")
             if name not in spells:
                 spells[name] = data[name]
 
 
-    with skills_file.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-        for className in data:
-            for skill in data[className].keys():
-                prefix = PREPENDS.get(className, PREPENDS["Spells"])
-                if skill not in locs:
-                    locs[name] = int(f"{prefix}{data[className][skill]['id']}")
-                if skill not in items:
-                    items[name] = int(f"{prefix}{data[className][skill]['id']}")
-                if name not in spells:
-                    spells[name] = data[name]
-                if className != "Riding" and skill not in spells_by_class[className]:
-                    spells_by_class[className][skill] = data[className][skill]
+    # with skills_file.open("r", encoding="utf-8") as f:
+    #     data = json.load(f)
+    #     for className in data:
+    #         for skill in data[className].keys():
+    #             prefix = PREPENDS.get(className, PREPENDS["Spells"])
+    #             if skill not in locs:
+    #                 locs[name] = int(f"{prefix}{data[className][skill]['id']}")
+    #             if skill not in items:
+    #                 items[name] = int(f"{prefix}{data[className][skill]['id']}")
+    #             if name not in spells:
+    #                 spells[name] = data[name]
+    #             if className != "Riding" and skill not in spells_by_class[className]:
+    #                 spells_by_class[className][skill] = data[className][skill]
 
     print(f"[WOW] Preloaded {len(locs)} locations and {len(items)} items.")
     return locs, items, quests, spells, all_zones, spells_by_class
@@ -297,97 +287,97 @@ class WowWorld(World):
 
         all_quests = {}
         zones = {}
+        character = self.char
 
-        for character in self.allChars:
-            seen_zones = []
-            connecting_level_appropriate_zones = []
+        seen_zones = []
+        connecting_level_appropriate_zones = []
 
-            def map_connections(zone_name):
-                zone = wowap_data[zone_name]
-                if zone_name in seen_zones:
-                    return
-                if zone.get("min_level", 0) < self.player_max_level:
-                    seen_zones.append(zone_name)
-                    connecting_level_appropriate_zones.append(zone_name) 
-                    for subzone in zone.get("connections", []):
-                        map_connections(subzone)
+        def map_connections(zone_name):
+            zone = wowap_data[zone_name]
+            if zone_name in seen_zones:
+                return
+            if zone.get("min_level", 0) < self.player_max_level:
+                seen_zones.append(zone_name)
+                connecting_level_appropriate_zones.append(zone_name) 
+                for subzone in zone.get("connections", []):
+                    map_connections(subzone)
 
-            map_connections(character["starting_zone"])
-            for zone_name, zone_data in wowap_data.items():
-                if zone_name not in connecting_level_appropriate_zones:
+        map_connections(character["starting_zone"])
+        for zone_name, zone_data in wowap_data.items():
+            if zone_name not in connecting_level_appropriate_zones:
+                continue
+
+            min_level = zone_data.get("min_level", 0)
+            if min_level >= self.player_max_level:
+                continue  # skip higher-level zones
+
+            try:
+                with pkg_resources.files(__package__).joinpath("quests", f"{zone_name}.json").open("r", encoding="utf-8") as zf:
+                    zone_quests = json.load(zf)
+            except json.JSONDecodeError as e:
+                print(f"[WOW] Failed to parse quests/{zone_name}.json: {e}")
+                continue
+
+            # Filter and add quests
+            quest_dict = {}
+            for quest_name, quest_data in zone_quests.items():
+                min_quest_level = quest_data.get("MinLevel", 1)
+                seasonalEvent = quest_data.get("seasonalEvent", 0)
+                races = quest_data.get("AllowableRaces", [])
+                classes = quest_data.get("AllowableClasses", [])
+                quest_id = quest_data.get("ID", 0)
+                reward_spell = quest_data.get("RewardSpell", 0) # Tame Beast, for example
+                faction_group = quest_data.get("FactionGroup", 0)
+                profession = quest_data.get("Profession", 0)
+                rep1 = quest_data.get("RequiredFactionValue1", 0)
+                rep2 = quest_data.get("RequiredFactionValue2", 0)
+                quest_zones = quest_data.get("zone", 0)
+                requires = quest_data.get("requires", 0)
+
+                if min_quest_level > self.player_max_level:
+                    continue
+                if seasonalEvent:
+                    continue
+                if races != [] and character["race"] not in races:
+                    continue
+                if faction_group and character["race"] not in FACTION_GROUP_TO_RACES[faction_group]:
+                    continue
+                if classes != [] and character["class"] not in classes:
+                    continue
+                if quest_id == 3861: # CLUCK! is behaving oddly
+                    continue
+                if  profession and profession not in self.professions:
+                    continue
+                if rep1 or rep2:
+                    continue
+                # if all zones not in connecting level appropriate zones - this excludes many seasonal event quests
+                all_zones_allowed = True
+                for zone in quest_zones:
+                    if zone not in connecting_level_appropriate_zones:
+                        all_zones_allowed = False
+                if not all_zones_allowed:
                     continue
 
-                min_level = zone_data.get("min_level", 0)
-                if min_level >= self.player_max_level:
-                    continue  # skip higher-level zones
+                quest_dict[quest_name] = {
+                    "zones": quest_zones,
+                    "requires": requires,
+                    "min_level": min_quest_level
+                    }
+                all_quests[quest_name] = {
+                    "min_level": min_quest_level,
+                    "zone": zone_name,
+                    "quest_id": quest_id,
+                    "reward_spell": reward_spell,
+                    "classes": classes,
+                    }
 
-                try:
-                    with pkg_resources.files(__package__).joinpath("quests", f"{zone_name}.json").open("r", encoding="utf-8") as zf:
-                        zone_quests = json.load(zf)
-                except json.JSONDecodeError as e:
-                    print(f"[WOW] Failed to parse quests/{zone_name}.json: {e}")
-                    continue
-
-                # Filter and add quests
-                quest_dict = {}
-                for quest_name, quest_data in zone_quests.items():
-                    min_quest_level = quest_data.get("MinLevel", 1)
-                    seasonalEvent = quest_data.get("seasonalEvent", 0)
-                    races = quest_data.get("AllowableRaces", [])
-                    classes = quest_data.get("AllowableClasses", [])
-                    quest_id = quest_data.get("ID", 0)
-                    reward_spell = quest_data.get("RewardSpell", 0) # Tame Beast, for example
-                    faction_group = quest_data.get("FactionGroup", 0)
-                    profession = quest_data.get("Profession", 0)
-                    rep1 = quest_data.get("RequiredFactionValue1", 0)
-                    rep2 = quest_data.get("RequiredFactionValue2", 0)
-                    quest_zones = quest_data.get("zone", 0)
-                    requires = quest_data.get("requires", 0)
-
-                    if min_quest_level > self.player_max_level:
-                        continue
-                    if seasonalEvent:
-                        continue
-                    if races != [] and character["race"] not in races:
-                        continue
-                    if faction_group and character["race"] not in FACTION_GROUP_TO_RACES[faction_group]:
-                        continue
-                    if classes != [] and character["class"] not in classes:
-                        continue
-                    if quest_id == 3861: # CLUCK! is behaving oddly
-                        continue
-                    if  profession and profession not in self.professions:
-                        continue
-                    if rep1 or rep2:
-                        continue
-                    # if all zones not in connecting level appropriate zones - this excludes many seasonal event quests
-                    all_zones_allowed = True
-                    for zone in quest_zones:
-                        if zone not in connecting_level_appropriate_zones:
-                            all_zones_allowed = False
-                    if not all_zones_allowed:
-                        continue
-
-                    quest_dict[quest_name] = {
-                        "zones": quest_zones,
-                        "requires": requires,
-                        "min_level": min_quest_level
-                        }
-                    all_quests[quest_name] = {
-                        "min_level": min_quest_level,
-                        "zone": zone_name,
-                        "quest_id": quest_id,
-                        "reward_spell": reward_spell,
-                        "classes": classes,
-                        }
-
-                zones[zone_name] = {
-                    "min_level": min_level,
-                    "max_level": zone_data.get("max_level", min_level + 10),
-                    "id": zone_data.get("id", 0),
-                    "connections": zone_data.get("connections", []),
-                    "quests": (zones.get(zone_name, {}).get("quests", {}) | quest_dict)
-                }
+            zones[zone_name] = {
+                "min_level": min_level,
+                "max_level": zone_data.get("max_level", min_level + 10),
+                "id": zone_data.get("id", 0),
+                "connections": zone_data.get("connections", []),
+                "quests": (zones.get(zone_name, {}).get("quests", {}) | quest_dict)
+            }
 
         print(f"[WOW] Loaded {len(all_quests)} quests from {len(zones)} zones (min_level < {self.player_max_level}).")
         return all_quests, zones
@@ -398,7 +388,7 @@ class WowWorld(World):
         spells_pkg = f"{__package__}.spells"
         spells = {}
         spells_with_rando = {} # needed if we do more than just shuffle spells, since spells are locations and items
-
+        character = self.char
 
         # --- Load skills and merge for this class ---
         try:
@@ -406,24 +396,23 @@ class WowWorld(World):
                 skills_data = json.load(f)
 
             # Class-specific skills
-            for character in self.allChars:
 
-                class_skills = skills_data.get(character["class"], {})
-                for skill_name, skill_data in class_skills.items():
-                    level = skill_data.get("Level", 1)
-                    skill_id = skill_data.get("id", 0)
-                    cost = skill_data.get("money_cost", 0)
+            class_skills = skills_data.get(character["class"], {})
+            for skill_name, skill_data in class_skills.items():
+                level = skill_data.get("Level", 1)
+                skill_id = skill_data.get("id", 0)
+                cost = skill_data.get("money_cost", 0)
 
-                    if level > self.player_max_level:
-                        continue
+                if level > self.player_max_level:
+                    continue
 
-                    spells[skill_name] = {
-                        "level": level,
-                        "spell_id": skill_id,
-                        "important": False,
-                        "cost": cost,
-                    }
-                    spells_with_rando[skill_name] = spells[skill_name]
+                spells[skill_name] = {
+                    "level": level,
+                    "spell_id": skill_id,
+                    "important": False,
+                    "cost": cost,
+                }
+                spells_with_rando[skill_name] = spells[skill_name]
 
                 # Riding skills (shared)
                 riding_skills = skills_data.get("Riding", {})
@@ -450,90 +439,78 @@ class WowWorld(World):
 
         print(f"[WOW] Loaded {len(spells)} total spells/skills for {character["class"]} class.")
         # --- Load spells for this class ---
-        for character in self.allChars:
-            try:
-                with pkg_resources.files(__package__).joinpath("spells", f"{character["class"]}.json").open("r", encoding="utf-8") as zf:
-                    data = json.load(zf)
-                    shuffled_spell_list = list(data.keys())
-                    random.shuffle(shuffled_spell_list)
+        try:
+            with pkg_resources.files(__package__).joinpath("spells", f"{character["class"]}.json").open("r", encoding="utf-8") as zf:
+                data = json.load(zf)
+                shuffled_spell_list = list(data.keys())
+                random.shuffle(shuffled_spell_list)
 
-                    for spell_name, spell_data in data.items():
-                        level = spell_data.get("Level", 1)
-                        spell_id = spell_data.get("id", 1)
-                        races = spell_data.get("AllowableRaces", [])  # portals
-                        important = spell_data.get("important", False)
-                        cost = spell_data.get("money_cost", 0)
+                for spell_name, spell_data in data.items():
+                    level = spell_data.get("Level", 1)
+                    spell_id = spell_data.get("id", 1)
+                    races = spell_data.get("AllowableRaces", [])  # portals
+                    important = spell_data.get("important", False)
+                    cost = spell_data.get("money_cost", 0)
 
-                        if level > self.player_max_level:
-                            continue
-                        if races and character["race"] not in races:
-                            continue
+                    if level > self.player_max_level:
+                        continue
+                    if races and character["race"] not in races:
+                        continue
 
-                        spells[spell_name] = {
+                    spells[spell_name] = {
+                        "level": level,
+                        "spell_id": spell_id,
+                        "important": important,
+                        "cost": cost,
+                    }
+
+                    if important: #always keep important spells
+                        spells_with_rando[spell_name] = spells[spell_name]
+                    else:
+                        new_spell_name = shuffled_spell_list.pop()
+                        new_spell_data = data[new_spell_name]
+                        important = new_spell_data.get("important", False)
+
+                        while important: #skip over important spells so we don't dupe them
+                            new_spell_name = shuffled_spell_list.pop()
+                            new_spell_data = data[new_spell_name]
+                            important = new_spell_data.get("important", False)
+
+                        level = new_spell_data.get("Level", 1)
+                        spell_id = new_spell_data.get("id", 1)
+                        races = new_spell_data.get("AllowableRaces", [])  # portals
+                        cost = new_spell_data.get("money_cost", 0)    
+                        spells_with_rando[new_spell_name] = {
                             "level": level,
                             "spell_id": spell_id,
                             "important": important,
                             "cost": cost,
                         }
 
-                        if important: #always keep important spells
-                            spells_with_rando[spell_name] = spells[spell_name]
-                        else:
-                            new_spell_name = shuffled_spell_list.pop()
-                            new_spell_data = data[new_spell_name]
-                            important = new_spell_data.get("important", False)
+        except FileNotFoundError:
+            print(f"[WOW] Warning: {character["class"]}.json not found in spells/ directory.")
+        except Exception as e:
+            print(f"[WOW] Failed to load {character["class"]}.json: {e}")
 
-                            while important: #skip over important spells so we don't dupe them
-                                new_spell_name = shuffled_spell_list.pop()
-                                new_spell_data = data[new_spell_name]
-                                important = new_spell_data.get("important", False)
-
-                            level = new_spell_data.get("Level", 1)
-                            spell_id = new_spell_data.get("id", 1)
-                            races = new_spell_data.get("AllowableRaces", [])  # portals
-                            cost = new_spell_data.get("money_cost", 0)    
-                            spells_with_rando[new_spell_name] = {
-                                "level": level,
-                                "spell_id": spell_id,
-                                "important": important,
-                                "cost": cost,
-                            }
-
-            except FileNotFoundError:
-                print(f"[WOW] Warning: {character["class"]}.json not found in spells/ directory.")
-            except Exception as e:
-                print(f"[WOW] Failed to load {character["class"]}.json: {e}")
-
-            print(f"[WOW] Loaded {len(spells)} spells for {character["class"]} class.")
+        print(f"[WOW] Loaded {len(spells)} spells for {character["class"]} class.")
         return spells, spells_with_rando
 
     # --------------------------------------------------------------------------
     # Generation
     # --------------------------------------------------------------------------
     def generate_output(self, output_directory: str) -> None:
-        export_lua_config(output_directory, self.options, self.allChars, self.player_name)
+        #export_lua_config(output_directory, self.options, self.allChars, self.player_name)
         return
 
     def generate_early(self):
         # --- Load all quests and zones dynamically ---
-        self.allChars = []
-        if not self.options.wow_race_and_class_combo.value:
-            character= {
-                "race": RACE_VALUE_TO_NAME[self.options.wow_race.value],
-                "class": CLASS_VALUE_TO_NAME[self.options.wow_class.value],
-                "starting_zone": RACE_TO_STARTING_ZONE[RACE_VALUE_TO_NAME[self.options.wow_race.value]],
-            }
-            self.allChars.append(character)
-
-        else:
-            for combo in self.options.wow_race_and_class_combo:
-                playerRace, playerClass = self.create_race_and_class(combo)
-                character= {
-                    "race": playerRace,
-                    "class": playerClass,
-                    "starting_zone": RACE_TO_STARTING_ZONE.get(playerRace, "Unknown")
-                }
-                self.allChars.append(character)
+        character= {
+            "race": RACE_VALUE_TO_NAME[self.options.wow_race.value],
+            "class": CLASS_VALUE_TO_NAME[self.options.wow_class.value],
+            "starting_zone": RACE_TO_STARTING_ZONE[RACE_VALUE_TO_NAME[self.options.wow_race.value]],
+        }
+        self.char = character
+        self.heirlooms = self.options.starting_heirlooms
 
         #self.player_class_name = CLASS_VALUE_TO_NAME.get(self.options.player_class.value, "Unknown")
         #self.player_race_name = RACE_VALUE_TO_NAME.get(self.options.wow_race.value, "Unknown")
@@ -561,15 +538,19 @@ class WowWorld(World):
         player = self.player
 
         # Determine the starting zone (lowest min_level)
-        for character in self.allChars:
-            starting_zone = character["starting_zone"]
-            starting_item = f"Unlock {starting_zone}"
+        starting_zone = self.char["starting_zone"]
+        starting_item = f"Unlock {starting_zone}"
 
-            # Grant the starting zone unlock
-            multiworld.push_precollected(Item(starting_item, ItemClassification.progression,
-                                            self.item_name_to_id[starting_item], player))
+        # Grant the starting zone unlock
+        multiworld.push_precollected(Item(starting_item, ItemClassification.progression,
+                                        self.item_name_to_id[starting_item], player))
+        
+        print(f"[WOW] Starting zone: {starting_zone} (player begins with '{starting_item}')")
 
-            print(f"[WOW] Starting zone: {starting_zone} (player begins with '{starting_item}')")
+        for heirloom in self.heirlooms:
+                multiworld.push_precollected(Item(heirloom, ItemClassification.useful,
+                                    self.item_name_to_id[heirloom], player))
+
 
 
     # --------------------------------------------------------------------------
@@ -577,6 +558,7 @@ class WowWorld(World):
     # --------------------------------------------------------------------------
     def create_regions(self):
         self.create_locations()
+        character = self.char
 
         multiworld = self.multiworld
         player = self.player
@@ -621,9 +603,8 @@ class WowWorld(World):
             zone_regions[zone_name] = region
 
         # --- Connect Menu to the starting zone
-            for character in self.allChars:
-                if zone_name == character["starting_zone"]:
-                    menu.connect(zone_regions[zone_name])
+            if zone_name == character["starting_zone"]:
+                menu.connect(zone_regions[zone_name])
 
         # --- Now add zone-to-zone connections using wowap.json data ---
         created_connections = set()
@@ -707,13 +688,10 @@ class WowWorld(World):
                     required_quests = quest_data.get("requires", [])
                     required_zones = quest_data.get("zones", [])
                     unlock_items = []
-                    starting_zones = []
-                    for character in self.allChars:
-                        if character["starting_zone"] not in starting_zones:
-                            starting_zones.append(character["starting_zone"])
+                    starting_zone = character["starting_zone"]
 
                     for zone in required_zones:
-                        if zone not in starting_zones:
+                        if zone != starting_zone:
                             unlock_items.append(f"Unlock {zone}")
                     # Only require tokens if above free level threshold
                     if min_quest_level > FREE_LEVELS + 1:
@@ -856,7 +834,7 @@ class WowWorld(World):
 
     # --------------------------------------------------------------------------
     # Item Creation
-    # --------------------------------------------------------------------------
+    # -------------------------------------------------------------------------—
     def create_items(self):
         multiworld = self.multiworld
         player = self.player
@@ -868,10 +846,7 @@ class WowWorld(World):
                         self.item_name_to_id["Progressive Level"], player)
             multiworld.itempool.append(item)
 
-        starting_zones = []
-        for character in self.allChars:
-            if character["starting_zone"] not in starting_zones:
-                starting_zones.append(character["starting_zone"])
+        starting_zone = self.char['starting_zone']
 
         # --- Zone Unlock Tokens ---
         for zone_name, zone_data in self.ZONES.items():
@@ -881,7 +856,7 @@ class WowWorld(World):
 
             item = Item(unlock_item_name, ItemClassification.progression,
                         self.item_name_to_id[unlock_item_name], player)
-            if zone_data["min_level"] < self.player_max_level and zone_name not in starting_zones:
+            if zone_data["min_level"] < self.player_max_level and zone_name != starting_zone:
                 multiworld.itempool.append(item)
 
         # --- Spell Tokens ---
@@ -951,26 +926,31 @@ class WowWorld(World):
         if missing > 0:
             for _ in range(missing):
                 rand = random.random()
-                if rand > 0.15 and not self.options.traps.value:
-                    item = Item("Gold", ItemClassification.filler,
-                                self.item_name_to_id["Gold"], player)
-                elif rand > 0.17 and self.options.traps.value:
-                    item = Item("Gold", ItemClassification.filler,
-                                self.item_name_to_id["Gold"], player)
-                elif rand > 0.05 and not self.options.traps.value:
-                    item = Item("Random Buff", ItemClassification.filler,
-                                self.item_name_to_id["Random Buff"], player)
-                elif rand > 0.10 and self.options.traps.value:
-                    item = Item("Random Buff", ItemClassification.filler,
-                                self.item_name_to_id["Random Buff"], player)
-                elif rand > 0.05 and self.options.traps.value:
-                    item = Item("Random Debuff", ItemClassification.trap,
-                                self.item_name_to_id["Random Debuff"], player)
-                else:
-                    item = Item("Random Bag", ItemClassification.filler,
-                                self.item_name_to_id["Random Bag"], player)
+                # if rand > 0.15 and not self.options.traps.value:
+                #     item = Item("Gold", ItemClassification.filler,
+                #                 self.item_name_to_id["Gold"], player)
+                # elif rand > 0.17 and self.options.traps.value:
+                #     item = Item("Gold", ItemClassification.filler,
+                #                 self.item_name_to_id["Gold"], player)
+                # elif rand > 0.05 and not self.options.traps.value:
+                #     item = Item("Random Buff", ItemClassification.filler,
+                #                 self.item_name_to_id["Random Buff"], player)
+                # elif rand > 0.10 and self.options.traps.value:
+                #     item = Item("Random Buff", ItemClassification.filler,
+                #                 self.item_name_to_id["Random Buff"], player)
+                # elif rand > 0.05 and self.options.traps.value:
+                #     item = Item("Random Debuff", ItemClassification.trap,
+                #                 self.item_name_to_id["Random Debuff"], player)
+                # else:
+                #     item = Item("Random Bag", ItemClassification.filler,
+                #                 self.item_name_to_id["Random Bag"], player)
 
+                if rand > 0.05:
+                    item = Item("Gold", ItemClassification.filler, self.item_name_to_id["Gold"], player)
+                else:
+                    item = Item("Mageweave Bag", ItemClassification.filler, self.item_name_to_id["Mageweave Bag"], player)
                 multiworld.itempool.append(item)
+
 
         print(f"[WOW] Added {missing} filler items for player {player} to match {total_locations} total locations.")
         print(f"[WOW] Added {len(self.ZONES)} zone unlocks, {self.player_max_level - 1} level tokens, and Victory.")
@@ -990,4 +970,7 @@ class WowWorld(World):
             if loc_name not in self.location_name_to_id:
                 self.location_name_to_id[loc_name] = len(self.location_name_to_id) + 1
 
-
+    def create_item(self, name: str):
+        if name not in self.item_name_to_id:
+            raise ValueError(f"Unknown item {name}")
+        return Item(name, ItemClassification.useful, self.item_name_to_id[name], self.player)

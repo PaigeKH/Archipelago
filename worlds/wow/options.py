@@ -35,32 +35,6 @@ class WoWClass(Choice):
     option_mage = 9
     #option_random = 10
 
-class WoWRaceClassCombo(OptionSet):
-    """
-    Choose which race and class you will play as.
-    Only valid race/class combos are accepted for now.
-    You may choose multiple characters to play.
-
-    The format is ["Race/Class"], ex:
-    ["Human/Warrior"] or ["Night Elf Hunter/Blood Elf Mage"]
-
-    """
-    display_name = "Character Selection"
-    valid_keys = [
-        "Human/Warrior", "Human/Paladin", "Human/Rogue", "Human/Death Knight", "Human/Priest", "Human/Mage", "Human/Warlock",
-        "Dwarf/Warrior", "Dwarf/Paladin", "Dwarf/Hunter", "Dwarf/Rogue", "Dwarf/Death Knight", "Dwarf/Priest",
-        "Night Elf/Warrior", "Night Elf/Hunter", "Night Elf/Rogue", "Night Elf/Priest", "Night Elf/Druid",
-        "Gnome/Warrior", "Gnome/Rogue", "Gnome/Death Knight", "Gnome/Mage", "Gnome/Warlock",
-        "Draenei/Warrior", "Draenei/Paladin", "Draenei/Hunter", "Draenei/Death Knight", "Dranei/Shaman", "Draenei/Priest", "Draenei/Mage",
-        "Orc/Warrior", "Orc/Hunter", "Orc/Rogue", "Orc/Death Knight", "Orc/Shaman", "Orc/Warlock",
-        "Undead/Warrior", "Undead/Rogue", "Undead/Death Knight", "Undead/Priest", "Undead/Mage", "Undead/Warlock",
-        "Tauren/Warrior", "Tauren/Hunter", "Tauren/Death Knight", "Tauren/Shaman", "Tauren/Druid",
-        "Troll/Warrior", "Troll/Hunter", "Troll/Rogue", "Troll/Death Knight", "Troll/Shaman", "Troll/Priest", "Troll/Mage",
-        "Blood Elf/Paladin", "Blood Elf/Hunter", "Blood Elf/Death Knight", "Blood Elf/Priest", "Blood Elf/Mage", "Blood Elf/Warlock"
-    ]
-
-    #option_random = 10
-
 class StartingZone(Choice):
     """
     Determines which zone you start in. Currently unsupported.
@@ -111,19 +85,6 @@ class Goal(Choice):
     option_level_70 = 6
     option_level_80 = 7
 
-class SpeedBoost(Range):
-    """
-    Multiplies player movement speed.
-
-    1 is default
-    2 is journeyman riding
-    5 is the max
-    """
-    display_name = "Speed Multiplier"
-    range_start = 1
-    range_end = 5
-    default = 1
-
 class ExpBoost(Range):
     """
     Multiplies gained experience.
@@ -137,37 +98,21 @@ class ExpBoost(Range):
     range_end = 10
     default = 1
 
+class StartingHeirlooms(OptionSet):
+    """
+    Players can choose a few heirlooms they would like to start with.
+    """
+    display_name = "Starting Heirlooms"
+    valid_keys = ["Tattered Dreadmist Robe","Tattered Dreadmist Mantle","Stained Shadowcraft Tunic","Preened Ironfeather Breastplate","Stained Shadowcraft Spaulders",
+        "Preened Ironfeather Shoulders","Champion's Deathdealer Breastplate","Mystical Vest of Elements","Champion Herod's Shoulder","Mystical Pauldrons of Elements",
+        "Polished Breastplate of Valor","Polished Spaulders of Valor","Exquisite Sunderseer Mantle","Lasting Feralheart Spaulders","Exceptional Stormshroud Shoulders",
+        "Prized Beastmaster's Mantle","Aged Pauldrons of The Five Thunders","Pristine Lightforge Spaulders","Strengthened Stockade Pauldrons",
 
-class HeirloomWeapons(Toggle):
-    """
-    Choose if class-appropriate heirloom weapons should be given to the player at the start of the game.
-    """
-    display_name = "Start with Heirloom Weapons"
+        "Balanced Heartseeker","Venerable Dal'Rend's Sacred Charge","Venerable Mass of McGowan","Devout Aurastone Hammer","Charmed Ancient Bone Bow",
+        "Bloodied Arcanite Reaper","Repurposed Lava Dredger","Dignified Headmaster's Charge","Battleworn Thrash Blade","Grand Staff of Jordan","Reforged Truesilver Champion",
+        "Sharpened Scarlet Kris","The Blessed Hammer of Grace","Upgraded Dwarven Hand Cannon",
 
-class HeirloomArmor(Toggle):
-    """
-    Choose if class-appropriate heirloom armor should be given to the player at the start of the game.
-    """
-    display_name = "Start with Heirloom Armor"
-
-class HeirloomTrinkets(Toggle):
-    """
-    Choose if heirloom trinkets should be given to the player at the start of the game.
-    """
-    display_name = "Start with Heirloom Trinkets"
-
-class StartingMoney(Range):
-    """
-    Starting money in copper
-    100 copper = 1 silver
-    100 silver = 1 gold
-    Min is 0
-    Max is 100000000 (=10k gold)
-    """
-    display_name = "Starting Money"
-    range_start = 0
-    range_end = 100000000
-    default = 0
+        "Swift Hand of Justice","Discerning Eye of the Beast","Dread Pirate Ring","Inherited Insignia of the Alliance","Inherited Insignia of the Horde"]
 
 class Traps(Toggle):
     """
@@ -183,6 +128,7 @@ class PrimaryProfessions(OptionSet):
     """
     Adds quests that require the player to have specific professions in order to accept and complete.
     It is highly recommended to choose a maximum of two per character.
+    Server owners can let players learn more than two primary professions in the config.
     """
     display_name = "Primary Professions"
     valid_keys = ["Skinning", "Herbalism", "Mining", "Leatherworking", "Alchemy", "Inscription", "Blacksmithing", "Jewelcrafting", "Tailoring", "Enchanting"]
@@ -210,16 +156,11 @@ class Cooking(DefaultOnToggle):
 class WorldOfWarcraftOptions(PerGameCommonOptions):
     wow_race: WoWRace
     wow_class: WoWClass
-    wow_race_and_class_combo: WoWRaceClassCombo
     randomize_spells: RandomizeSpells
     starting_zone: StartingZone
     goal: Goal
-    speed_boost: SpeedBoost
     exp_boost: ExpBoost
-    heirloom_armor: HeirloomArmor
-    heirloom_weapons: HeirloomWeapons
-    heirloom_trinkets: HeirloomTrinkets
-    starting_money: StartingMoney
+    starting_heirlooms: StartingHeirlooms
     traps: Traps
     death_link: WoWDeathLink
     primary_professions: PrimaryProfessions
